@@ -22,6 +22,11 @@ module PhasedSegment : sig
    val show : t -> string
    val equal : t -> t -> bool
 
+   (** [subspace a b] returns true if the rowspace of a.sim2 is a subspace of the rowspace of b.sim2  *)
+   val subspace : t -> t -> bool
+   (** [dimension a] returns the dimension of the rowspace of a.sim2 *)
+   val dimension : t -> int
+
    (** Computes the best phased segment for the given partition of matrices *)
    val make : (kind * QQMatrix.t) array -> t
 end
@@ -39,5 +44,5 @@ module PhasedSegmentation : sig
    val almost_commutes : t -> bool
 
    (** Computes the best almost commuting abstraction for the given LTS *)
-   val best_almost_commuting : QQMatrix.t array -> (QQMatrix.t * QQMatrix.t array)
+   val best_almost_commuting : QQMatrix.t array -> t
 end

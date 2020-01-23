@@ -72,6 +72,10 @@ module PhasedSegment = struct
       p.phase2
       q.phase2
 
+  let subspace p q = VS.subspace (VS.of_matrix p.sim2) (VS.of_matrix q.sim2)
+
+  let dimension p = VS.dimension (VS.of_matrix p.sim2)
+
   let make pairs =
     if Array.length pairs == 0 then
       raise (Invalid_argument "Array of matrices should not be empty")
@@ -107,6 +111,69 @@ module PhasedSegment = struct
         phase2 = phase2 }
 
 end
+
+let set_kind ps i k =
+  let ps' = Array.copy ps in
+  let _, mM = Array.get ps' i in
+  Array.set ps' i (k, mM);
+  ps'
+
+let fold_ignore start pairs fn =
+  let rec iter prev pairs i fn =
+    if i < Array.length pairs then
+      let k, mM = Array.get pairs i in
+      if k == Ignore then
+        let halt, res = fn prev pairs i in
+        if halt then
+          true, res
+        else
+          iter res pairs (i+1) fn
+      else
+        iter prev pairs (i+1) fn
+    else
+      false, prev
+  in
+  iter start pairs 0 fn
+
+let iter_ignore pairs fn =
+  let rec iter pairs i fn =
+    if i < Array.length pairs then
+      let k, mM = Array.get pairs i in
+      if k == Ignore then
+        let halt, res = fn pairs i in
+        if halt then
+          true, res
+        else
+          iter pairs (i+1) fn
+      else
+        iter pairs (i+1) fn
+    else
+      false, None
+  in
+  iter pairs 0 fn
+
+type state = Close | Cancel | Refine
+
+let next_reset pairs dim =
+  let check_subsumption prev ps i =
+    let rpairs = set_kind pairs i Reset in
+    let rseg = PhasedSegment.make rpairs in
+    let cpairs = set_kind pairs i Commute in
+    let check_cext prev ps' i' =
+      let cpairs' = set_kind pairs i Commute in
+      let cseg = PhasedSegment.make cpairs' in
+      if not (PhasedSegment.subspace rseg cseg) then
+        if (PhasedSegment.dimension rseg) < dim then
+          true, (Refine, Some rpairs)
+        else
+          false, prev
+      else
+        false, (Cancel, None)
+    in
+    fold_ignore prev cpairs check_cext
+  in
+  let _, result = fold_ignore (Close, None) pairs check_subsumption in
+  result
 
 module PhasedSegmentation = struct
 
