@@ -152,28 +152,97 @@ let iter_ignore pairs fn =
   in
   iter pairs 0 fn
 
+let ignore_map pairs fn =
+  try Some (BatEnum.find_map 
+            (fun (i, (k, mM)) -> if k == Ignore then fn pairs i else None)
+            (BatEnum.mapi (fun i p -> i, p) (BatArray.enum pairs)))
+  with Not_found -> None
+
+let ignore_pairs_map pairs fn =
+  ignore_map 
+    pairs 
+    (fun _ i -> ignore_map 
+                  pairs 
+                  (fun _ j -> if i < j then fn pairs i j else None))
+
 type state = Close | Cancel | Refine
 
+let next_commute pairs dim =
+  let state = ref Close in
+  let check_subsumption ps i j =
+    let riseg = PhasedSegment.make (set_kind pairs i Reset) in
+    let rjseg = PhasedSegment.make (set_kind pairs j Reset) in
+    let ciseg = PhasedSegment.make (set_kind pairs i Commute) in
+    let cjseg = PhasedSegment.make (set_kind pairs j Commute) in
+    if not ((PhasedSegment.subspace ciseg riseg) && (PhasedSegment.subspace cjseg rjseg)) then
+      let cpairs = set_kind (set_kind pairs i Commute) j Commute in
+      let cseg = PhasedSegment.make cpairs in
+      if (PhasedSegment.dimension cseg) < dim then begin
+        state := Refine;
+        Some (cpairs, cseg)
+      end
+      else
+        None
+    else begin
+      state := Cancel;
+      None
+    end
+  in
+  let result = ignore_pairs_map pairs check_subsumption in
+  !state, result
+
 let next_reset pairs dim =
-  let check_subsumption prev ps i =
+  let state = ref Close in
+  let check_subsumption ps i =
     let rpairs = set_kind pairs i Reset in
     let rseg = PhasedSegment.make rpairs in
     let cpairs = set_kind pairs i Commute in
-    let check_cext prev ps' i' =
+    let check_cext ps' i' =
       let cpairs' = set_kind pairs i Commute in
       let cseg = PhasedSegment.make cpairs' in
       if not (PhasedSegment.subspace rseg cseg) then
-        if (PhasedSegment.dimension rseg) < dim then
-          true, (Refine, Some rpairs)
+        if (PhasedSegment.dimension rseg) < dim then begin
+          state := Refine;
+          Some (rpairs, rseg)
+        end
         else
-          false, prev
-      else
-        false, (Cancel, None)
+          None
+      else begin
+        state := Cancel;
+        None
+      end
     in
-    fold_ignore prev cpairs check_cext
+    ignore_map cpairs check_cext
   in
-  let _, result = fold_ignore (Close, None) pairs check_subsumption in
-  result
+  let result = ignore_map pairs check_subsumption in
+  !state, result
+
+let next_extension kind =
+  match kind with
+  | Reset -> next_reset
+  | Commute -> next_commute
+
+let make matrices =
+  let segments = BatQueue.create () in
+  let pairs = Array.map (fun mM -> (Ignore, mM)) matrices in
+  let segment = PhasedSegment.make pairs in
+  let rec iter pairs segment dim =
+    let next kind =
+      match next_extension kind pairs dim with
+      | (Refine, Some (ps, seg)) -> iter ps seg (PhasedSegment.dimension seg)
+      | (Close, _) -> 
+          let seg = (PhasedSegment.make (Array.map 
+                                (fun (k, mM) -> if k == Ignore then (kind, mM) else (k, mM))
+                                pairs))
+          in
+          BatQueue.push seg segments;
+      | (Cancel, _) -> ()
+    in
+    next Reset;
+    next Commute
+  in
+  iter pairs segment (PhasedSegment.dimension segment);
+  segments
 
 module PhasedSegmentation = struct
 
